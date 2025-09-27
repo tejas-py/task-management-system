@@ -12,6 +12,7 @@ import { Users, CheckSquare, LogOut, ChevronDown, Menu, X } from "lucide-react";
 import { AuthService } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { UsersManagement } from "./UsersManagement";
+import { TasksManagement } from "./TasksManagement";
 
 type TabType = "users" | "tasks";
 
@@ -51,12 +52,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "users":
         return <UsersManagement />;
       case "tasks":
-        return (
-          <div className="p-4 md:p-6">
-            <h2 className="text-xl md:text-2xl font-bold mb-4">Tasks Management</h2>
-            <p className="text-muted-foreground">Tasks management functionality will be implemented here.</p>
-          </div>
-        );
+        return <TasksManagement />;
       default:
         return null;
     }
