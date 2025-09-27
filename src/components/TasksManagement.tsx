@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,13 +44,11 @@ import {
 } from "@/components/ui/popover";
 import {
   Plus,
-  Search,
   Edit,
   Trash2,
   Calendar as CalendarIcon,
-  Filter,
   Clock,
-  User,
+  User as UserIcon,
   CheckCircle,
   Circle,
   AlertTriangle,
@@ -61,91 +59,30 @@ import {
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { AuthService } from "@/lib/auth";
+import {
+  TasksService,
+  type Task as APITask,
+  type CreateTaskFormData,
+  type TaskStatus,
+  type TaskPriority,
+  type User,
+  type ListTasksParams,
+  type MyTasksParams,
+} from "@/lib/tasks";
 
-// Task types and interfaces
-export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
-
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  assignee_id: string | null;
+// Extended task interface for UI
+export interface Task extends APITask {
   assignee_name?: string;
-  due_date: string | null;
-  created_at: string;
-  updated_at: string;
-  created_by: string;
   created_by_name?: string;
 }
 
-export interface CreateTaskFormData {
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  assignee_id: string;
-  due_date: Date | null;
-}
-
-// Dummy data for demonstration
-const dummyTasks: Task[] = [
-  {
-    id: "1",
-    title: "Complete User Authentication",
-    description: "Implement login and registration functionality with JWT tokens",
-    status: "in_progress",
-    priority: "high",
-    assignee_id: "user1",
-    assignee_name: "John Doe",
-    due_date: "2025-01-15T00:00:00Z",
-    created_at: "2025-01-01T10:00:00Z",
-    updated_at: "2025-01-05T14:30:00Z",
-    created_by: "admin",
-    created_by_name: "Administrator",
-  },
-  {
-    id: "2",
-    title: "Design Task Management UI",
-    description: "Create wireframes and mockups for the task management interface",
-    status: "completed",
-    priority: "medium",
-    assignee_id: "user2",
-    assignee_name: "Jane Smith",
-    due_date: "2025-01-10T00:00:00Z",
-    created_at: "2024-12-28T09:00:00Z",
-    updated_at: "2025-01-02T16:45:00Z",
-    created_by: "admin",
-    created_by_name: "Administrator",
-  },
-  {
-    id: "3",
-    title: "Setup Database Schema",
-    description: "Design and implement the database schema for users and tasks",
-    status: "pending",
-    priority: "urgent",
-    assignee_id: "user3",
-    assignee_name: "Bob Wilson",
-    due_date: "2025-01-20T00:00:00Z",
-    created_at: "2025-01-03T11:15:00Z",
-    updated_at: "2025-01-03T11:15:00Z",
-    created_by: "user1",
-    created_by_name: "John Doe",
-  },
-];
-
-const dummyUsers = [
-  { id: "user1", name: "John Doe" },
-  { id: "user2", name: "Jane Smith" },
-  { id: "user3", name: "Bob Wilson" },
-  { id: "admin", name: "Administrator" },
-];
 
 export function TasksManagement() {
-  const [tasks, setTasks] = useState<Task[]>(dummyTasks);
-  const [users] = useState(dummyUsers);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [myTasks, setMyTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [isLoadingMyTasks, setIsLoadingMyTasks] = useState(false);
   const [createTaskForm, setCreateTaskForm] = useState<CreateTaskFormData>({
     title: "",
     description: "",
@@ -171,12 +108,82 @@ export function TasksManagement() {
   // Filter and search states
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">("all");
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
+    "all",
+  );
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const currentUser = AuthService.getUser();
+
+  // Fetch initial data on component mount
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      await Promise.all([fetchUsers(), fetchTasks(), fetchMyTasks()]);
+    };
+
+    fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch users function
+  const fetchUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const fetchedUsers = await TasksService.listUsers();
+      setUsers(fetchedUsers);
+    } catch (err) {
+      console.error("Error fetching users:", err);
+      setError("Failed to load users. Please refresh the page.");
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  // Fetch tasks function
+  const fetchTasks = async (params?: ListTasksParams) => {
+    setIsLoadingTasks(true);
+    try {
+      const fetchedTasks = await TasksService.listTasks(params);
+
+      // Add UI-specific fields to tasks
+      const tasksWithNames: Task[] = fetchedTasks.map(task => ({
+        ...task,
+        assignee_name: task.assignee?.username || "Unassigned",
+        created_by_name: users.find(u => u.id === task.created_by)?.username || "Unknown User",
+      }));
+
+      setTasks(tasksWithNames);
+    } catch (err) {
+      console.error("Error fetching tasks:", err);
+      setError("Failed to load tasks. Please refresh the page.");
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  };
+
+  // Fetch my tasks function
+  const fetchMyTasks = async (params?: MyTasksParams) => {
+    setIsLoadingMyTasks(true);
+    try {
+      const fetchedMyTasks = await TasksService.getMyTasks(params);
+
+      // Add UI-specific fields to my tasks
+      const myTasksWithNames: Task[] = fetchedMyTasks.map(task => ({
+        ...task,
+        assignee_name: task.assignee?.username || "Unassigned",
+        created_by_name: users.find(u => u.id === task.created_by)?.username || "Unknown User",
+      }));
+
+      setMyTasks(myTasksWithNames);
+    } catch (err) {
+      console.error("Error fetching my tasks:", err);
+      setError("Failed to load my tasks. Please refresh the page.");
+    } finally {
+      setIsLoadingMyTasks(false);
+    }
+  };
 
   // Get status badge variant
   const getStatusBadgeVariant = (status: TaskStatus) => {
@@ -226,25 +233,22 @@ export function TasksManagement() {
     }
   };
 
-  // Filter tasks based on search and filters
+  // Apply filters to current tasks for immediate UI feedback
   const filteredTasks = tasks.filter((task) => {
     const matchesSearch =
       task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.assignee_name?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-    const matchesPriority = priorityFilter === "all" || task.priority === priorityFilter;
+    const matchesStatus =
+      statusFilter === "all" || task.status === statusFilter;
+    const matchesPriority =
+      priorityFilter === "all" || task.priority === priorityFilter;
 
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  // Get my tasks (assigned to me or created by me)
-  const myTasks = tasks.filter(
-    (task) =>
-      task.assignee_id === currentUser?.id ||
-      task.created_by === currentUser?.id
-  );
+
 
   // Handle create task
   const handleCreateTask = async (e: React.FormEvent) => {
@@ -254,20 +258,11 @@ export function TasksManagement() {
     setIsCreatingTask(true);
 
     try {
-      // TODO: Replace with actual API call
-      const newTask: Task = {
-        id: `task-${Date.now()}`,
-        ...createTaskForm,
-        due_date: createTaskForm.due_date?.toISOString() || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        created_by: currentUser?.id || "unknown",
-        created_by_name: currentUser?.username || "Unknown",
-        assignee_name: users.find(u => u.id === createTaskForm.assignee_id)?.name,
-      };
+      await TasksService.createTask(createTaskForm);
 
-      setTasks([newTask, ...tasks]);
-      setSuccess("Task created successfully!");
+      // Refresh both task lists to get the latest data
+      await Promise.all([fetchTasks(), fetchMyTasks()]);
+
       setCreateTaskForm({
         title: "",
         description: "",
@@ -277,7 +272,9 @@ export function TasksManagement() {
         due_date: null,
       });
       setIsCreateDialogOpen(false);
-    } catch {
+      setSuccess("Task created successfully!");
+    } catch (err) {
+      console.error("Error creating task:", err);
       setError("Failed to create task. Please try again.");
     } finally {
       setIsCreatingTask(false);
@@ -303,9 +300,11 @@ export function TasksManagement() {
           ? {
               ...updateTaskForm,
               updated_at: new Date().toISOString(),
-              assignee_name: users.find(u => u.id === updateTaskForm.assignee_id)?.name,
+              assignee_name: users.find(
+                (u) => u.id === updateTaskForm.assignee_id,
+              )?.username,
             }
-          : task
+          : task,
       );
 
       setTasks(updatedTasks);
@@ -379,7 +378,12 @@ export function TasksManagement() {
                 <Input
                   id="title"
                   value={createTaskForm.title}
-                  onChange={(e) => setCreateTaskForm({...createTaskForm, title: e.target.value})}
+                  onChange={(e) =>
+                    setCreateTaskForm({
+                      ...createTaskForm,
+                      title: e.target.value,
+                    })
+                  }
                   placeholder="Enter task title"
                   required
                 />
@@ -390,7 +394,12 @@ export function TasksManagement() {
                 <Textarea
                   id="description"
                   value={createTaskForm.description}
-                  onChange={(e) => setCreateTaskForm({...createTaskForm, description: e.target.value})}
+                  onChange={(e) =>
+                    setCreateTaskForm({
+                      ...createTaskForm,
+                      description: e.target.value,
+                    })
+                  }
                   placeholder="Enter task description"
                   rows={3}
                   required
@@ -403,7 +412,7 @@ export function TasksManagement() {
                   <Select
                     value={createTaskForm.status}
                     onValueChange={(value: TaskStatus) =>
-                      setCreateTaskForm({...createTaskForm, status: value})
+                      setCreateTaskForm({ ...createTaskForm, status: value })
                     }
                   >
                     <SelectTrigger>
@@ -423,7 +432,7 @@ export function TasksManagement() {
                   <Select
                     value={createTaskForm.priority}
                     onValueChange={(value: TaskPriority) =>
-                      setCreateTaskForm({...createTaskForm, priority: value})
+                      setCreateTaskForm({ ...createTaskForm, priority: value })
                     }
                   >
                     <SelectTrigger>
@@ -444,16 +453,20 @@ export function TasksManagement() {
                 <Select
                   value={createTaskForm.assignee_id}
                   onValueChange={(value) =>
-                    setCreateTaskForm({...createTaskForm, assignee_id: value})
+                    setCreateTaskForm({ ...createTaskForm, assignee_id: value })
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select assignee" />
+                    <SelectValue
+                      placeholder={
+                        isLoadingUsers ? "Loading users..." : "Select assignee"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {users.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
-                        {user.name}
+                        {user.username}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -468,7 +481,7 @@ export function TasksManagement() {
                       variant="outline"
                       className={cn(
                         "w-full justify-start text-left font-normal",
-                        !createTaskForm.due_date && "text-muted-foreground"
+                        !createTaskForm.due_date && "text-muted-foreground",
                       )}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
@@ -483,14 +496,22 @@ export function TasksManagement() {
                     <Calendar
                       mode="single"
                       selected={createTaskForm.due_date || undefined}
-                      onSelect={(date) => setCreateTaskForm({...createTaskForm, due_date: date || null})}
-                      initialFocus
+                      onSelect={(date) =>
+                        setCreateTaskForm({
+                          ...createTaskForm,
+                          due_date: date || null,
+                        })
+                      }
                     />
                   </PopoverContent>
                 </Popover>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isCreatingTask}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isCreatingTask}
+              >
                 {isCreatingTask ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
@@ -541,10 +562,14 @@ export function TasksManagement() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {/* TODO: Refresh tasks */}}
+                  onClick={() => fetchTasks()}
                   disabled={isLoadingTasks}
                 >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingTasks ? 'animate-spin' : ''}`} />
+                  <RefreshCw
+                    className={`h-4 w-4 mr-2 ${
+                      isLoadingTasks ? "animate-spin" : ""
+                    }`}
+                  />
                   Refresh
                 </Button>
               </div>
@@ -560,7 +585,12 @@ export function TasksManagement() {
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Select value={statusFilter} onValueChange={(value: TaskStatus | "all") => setStatusFilter(value)}>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value: TaskStatus | "all") =>
+                      setStatusFilter(value)
+                    }
+                  >
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
@@ -573,7 +603,12 @@ export function TasksManagement() {
                     </SelectContent>
                   </Select>
 
-                  <Select value={priorityFilter} onValueChange={(value: TaskPriority | "all") => setPriorityFilter(value)}>
+                  <Select
+                    value={priorityFilter}
+                    onValueChange={(value: TaskPriority | "all") =>
+                      setPriorityFilter(value)
+                    }
+                  >
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Priority" />
                     </SelectTrigger>
@@ -604,8 +639,13 @@ export function TasksManagement() {
                   <TableBody>
                     {filteredTasks.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                          {searchQuery || statusFilter !== "all" || priorityFilter !== "all"
+                        <TableCell
+                          colSpan={6}
+                          className="text-center py-8 text-muted-foreground"
+                        >
+                          {searchQuery ||
+                          statusFilter !== "all" ||
+                          priorityFilter !== "all"
                             ? "No tasks found matching your filters."
                             : "No tasks found."}
                         </TableCell>
@@ -622,25 +662,32 @@ export function TasksManagement() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={getStatusBadgeVariant(task.status)} className="flex items-center gap-1 w-fit">
+                            <Badge
+                              variant={getStatusBadgeVariant(task.status)}
+                              className="flex items-center gap-1 w-fit"
+                            >
                               {getStatusIcon(task.status)}
-                              {task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                              {task.status
+                                .replace("_", " ")
+                                .replace(/\b\w/g, (l) => l.toUpperCase())}
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={getPriorityBadgeVariant(task.priority)}>
-                              {task.priority.replace(/\b\w/g, l => l.toUpperCase())}
+                            <Badge
+                              variant={getPriorityBadgeVariant(task.priority)}
+                            >
+                              {task.priority.replace(/\b\w/g, (l) =>
+                                l.toUpperCase(),
+                              )}
                             </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <User className="h-4 w-4 text-muted-foreground" />
+                              <UserIcon className="h-4 w-4 text-muted-foreground" />
                               <span>{task.assignee_name || "Unassigned"}</span>
                             </div>
                           </TableCell>
-                          <TableCell>
-                            {formatDate(task.due_date)}
-                          </TableCell>
+                          <TableCell>{formatDate(task.due_date)}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button
@@ -681,11 +728,11 @@ export function TasksManagement() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
+                <UserIcon className="h-5 w-5" />
                 My Tasks ({myTasks.length})
               </CardTitle>
               <CardDescription>
-                Tasks assigned to me or created by me
+                Tasks assigned to me!
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -702,9 +749,24 @@ export function TasksManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {myTasks.length === 0 ? (
+                    {isLoadingMyTasks ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        <TableCell
+                          colSpan={6}
+                          className="text-center py-8 text-muted-foreground"
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+                            Loading my tasks...
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : myTasks.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="text-center py-8 text-muted-foreground"
+                        >
                           No tasks assigned to you or created by you.
                         </TableCell>
                       </TableRow>
@@ -720,24 +782,33 @@ export function TasksManagement() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={getStatusBadgeVariant(task.status)} className="flex items-center gap-1 w-fit">
+                            <Badge
+                              variant={getStatusBadgeVariant(task.status)}
+                              className="flex items-center gap-1 w-fit"
+                            >
                               {getStatusIcon(task.status)}
-                              {task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                              {task.status
+                                .replace("_", " ")
+                                .replace(/\b\w/g, (l) => l.toUpperCase())}
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={getPriorityBadgeVariant(task.priority)}>
-                              {task.priority.replace(/\b\w/g, l => l.toUpperCase())}
+                            <Badge
+                              variant={getPriorityBadgeVariant(task.priority)}
+                            >
+                              {task.priority.replace(/\b\w/g, (l) =>
+                                l.toUpperCase(),
+                              )}
                             </Badge>
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline">
-                              {task.assignee_id === currentUser?.id ? "Assignee" : "Creator"}
+                              {task.assignee_id === currentUser?.id
+                                ? "Assignee"
+                                : "Creator"}
                             </Badge>
                           </TableCell>
-                          <TableCell>
-                            {formatDate(task.due_date)}
-                          </TableCell>
+                          <TableCell>{formatDate(task.due_date)}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button
@@ -790,24 +861,35 @@ export function TasksManagement() {
                 <div>
                   <Label className="text-sm font-medium">Status</Label>
                   <div className="mt-1">
-                    <Badge variant={getStatusBadgeVariant(selectedTask.status)} className="flex items-center gap-1 w-fit">
+                    <Badge
+                      variant={getStatusBadgeVariant(selectedTask.status)}
+                      className="flex items-center gap-1 w-fit"
+                    >
                       {getStatusIcon(selectedTask.status)}
-                      {selectedTask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      {selectedTask.status
+                        .replace("_", " ")
+                        .replace(/\b\w/g, (l) => l.toUpperCase())}
                     </Badge>
                   </div>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Priority</Label>
                   <div className="mt-1">
-                    <Badge variant={getPriorityBadgeVariant(selectedTask.priority)}>
-                      {selectedTask.priority.replace(/\b\w/g, l => l.toUpperCase())}
+                    <Badge
+                      variant={getPriorityBadgeVariant(selectedTask.priority)}
+                    >
+                      {selectedTask.priority.replace(/\b\w/g, (l) =>
+                        l.toUpperCase(),
+                      )}
                     </Badge>
                   </div>
                 </div>
               </div>
               <div>
                 <Label className="text-sm font-medium">Assignee</Label>
-                <p className="text-sm mt-1">{selectedTask.assignee_name || "Unassigned"}</p>
+                <p className="text-sm mt-1">
+                  {selectedTask.assignee_name || "Unassigned"}
+                </p>
               </div>
               <div>
                 <Label className="text-sm font-medium">Created By</Label>
@@ -815,16 +897,22 @@ export function TasksManagement() {
               </div>
               <div>
                 <Label className="text-sm font-medium">Due Date</Label>
-                <p className="text-sm mt-1">{formatDate(selectedTask.due_date)}</p>
+                <p className="text-sm mt-1">
+                  {formatDate(selectedTask.due_date)}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-sm font-medium">Created</Label>
-                  <p className="text-sm mt-1">{formatDate(selectedTask.created_at)}</p>
+                  <p className="text-sm mt-1">
+                    {formatDate(selectedTask.created_at)}
+                  </p>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Updated</Label>
-                  <p className="text-sm mt-1">{formatDate(selectedTask.updated_at)}</p>
+                  <p className="text-sm mt-1">
+                    {formatDate(selectedTask.updated_at)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -848,7 +936,12 @@ export function TasksManagement() {
                 <Input
                   id="update-title"
                   value={updateTaskForm.title}
-                  onChange={(e) => setUpdateTaskForm({...updateTaskForm, title: e.target.value})}
+                  onChange={(e) =>
+                    setUpdateTaskForm({
+                      ...updateTaskForm,
+                      title: e.target.value,
+                    })
+                  }
                   required
                 />
               </div>
@@ -858,7 +951,12 @@ export function TasksManagement() {
                 <Textarea
                   id="update-description"
                   value={updateTaskForm.description}
-                  onChange={(e) => setUpdateTaskForm({...updateTaskForm, description: e.target.value})}
+                  onChange={(e) =>
+                    setUpdateTaskForm({
+                      ...updateTaskForm,
+                      description: e.target.value,
+                    })
+                  }
                   rows={3}
                   required
                 />
@@ -870,7 +968,7 @@ export function TasksManagement() {
                   <Select
                     value={updateTaskForm.status}
                     onValueChange={(value: TaskStatus) =>
-                      setUpdateTaskForm({...updateTaskForm, status: value})
+                      setUpdateTaskForm({ ...updateTaskForm, status: value })
                     }
                   >
                     <SelectTrigger>
@@ -890,7 +988,7 @@ export function TasksManagement() {
                   <Select
                     value={updateTaskForm.priority}
                     onValueChange={(value: TaskPriority) =>
-                      setUpdateTaskForm({...updateTaskForm, priority: value})
+                      setUpdateTaskForm({ ...updateTaskForm, priority: value })
                     }
                   >
                     <SelectTrigger>
@@ -911,16 +1009,20 @@ export function TasksManagement() {
                 <Select
                   value={updateTaskForm.assignee_id || ""}
                   onValueChange={(value) =>
-                    setUpdateTaskForm({...updateTaskForm, assignee_id: value})
+                    setUpdateTaskForm({ ...updateTaskForm, assignee_id: value })
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select assignee" />
+                    <SelectValue
+                      placeholder={
+                        isLoadingUsers ? "Loading users..." : "Select assignee"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {users.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
-                        {user.name}
+                        {user.username} - {user.full_name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -935,7 +1037,7 @@ export function TasksManagement() {
                       variant="outline"
                       className={cn(
                         "w-full justify-start text-left font-normal",
-                        !updateTaskForm.due_date && "text-muted-foreground"
+                        !updateTaskForm.due_date && "text-muted-foreground",
                       )}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
@@ -949,18 +1051,27 @@ export function TasksManagement() {
                   <PopoverContent className="w-auto p-0">
                     <Calendar
                       mode="single"
-                      selected={updateTaskForm.due_date ? new Date(updateTaskForm.due_date) : undefined}
-                      onSelect={(date) => setUpdateTaskForm({
-                        ...updateTaskForm,
-                        due_date: date?.toISOString() || null
-                      })}
-                      initialFocus
+                      selected={
+                        updateTaskForm.due_date
+                          ? new Date(updateTaskForm.due_date)
+                          : undefined
+                      }
+                      onSelect={(date) =>
+                        setUpdateTaskForm({
+                          ...updateTaskForm,
+                          due_date: date?.toISOString() || null,
+                        })
+                      }
                     />
                   </PopoverContent>
                 </Popover>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isUpdatingTask}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isUpdatingTask}
+              >
                 {isUpdatingTask ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
