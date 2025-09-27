@@ -294,24 +294,26 @@ export function TasksManagement() {
     }
 
     try {
-      // TODO: Replace with actual API call
-      const updatedTasks = tasks.map((task) =>
-        task.id === updateTaskForm.id
-          ? {
-              ...updateTaskForm,
-              updated_at: new Date().toISOString(),
-              assignee_name: users.find(
-                (u) => u.id === updateTaskForm.assignee_id,
-              )?.username,
-            }
-          : task,
-      );
+      // Convert Task to CreateTaskFormData format for API
+      const formData: CreateTaskFormData = {
+        title: updateTaskForm.title,
+        description: updateTaskForm.description,
+        status: updateTaskForm.status,
+        priority: updateTaskForm.priority,
+        assignee_id: updateTaskForm.assignee_id || "",
+        due_date: updateTaskForm.due_date ? new Date(updateTaskForm.due_date) : null,
+      };
 
-      setTasks(updatedTasks);
+      await TasksService.updateTask(updateTaskForm.id, formData);
+
+      // Refresh both task lists to get the latest data
+      await Promise.all([fetchTasks(), fetchMyTasks()]);
+
       setSuccess("Task updated successfully!");
       setIsUpdateDialogOpen(false);
       setUpdateTaskForm(null);
-    } catch {
+    } catch (err) {
+      console.error("Error updating task:", err);
       setError("Failed to update task. Please try again.");
     } finally {
       setIsUpdatingTask(false);
@@ -325,11 +327,14 @@ export function TasksManagement() {
     setIsDeletingTask(true);
 
     try {
-      // TODO: Replace with actual API call
-      const updatedTasks = tasks.filter((task) => task.id !== taskId);
-      setTasks(updatedTasks);
+      await TasksService.deleteTask(taskId);
+
+      // Refresh both task lists to get the latest data
+      await Promise.all([fetchTasks(), fetchMyTasks()]);
+
       setSuccess("Task deleted successfully!");
-    } catch {
+    } catch (err) {
+      console.error("Error deleting task:", err);
       setError("Failed to delete task. Please try again.");
     } finally {
       setIsDeletingTask(false);

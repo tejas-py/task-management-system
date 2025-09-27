@@ -38,6 +38,15 @@ export interface CreateTaskPayload {
   due_date: string;
 }
 
+export interface UpdateTaskPayload {
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee_id: string;
+  due_date: string;
+}
+
 export interface CreateTaskFormData {
   title: string;
   description: string;
@@ -188,5 +197,62 @@ export class TasksService {
     }
 
     return response.data;
+  }
+
+  static async updateTask(taskId: string, formData: CreateTaskFormData): Promise<Task> {
+    const payload: UpdateTaskPayload = {
+      title: formData.title,
+      description: formData.description,
+      status: formData.status,
+      priority: formData.priority,
+      assignee_id: formData.assignee_id,
+      due_date: formData.due_date
+        ? formData.due_date.toISOString()
+        : new Date().toISOString(),
+    };
+
+    const response = await apiRequest<Task>(`/api/v1/tasks/${taskId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.getAuthHeaders(),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.error) {
+      throw new Error(response.error);
+    }
+
+    if (!response.data) {
+      throw new Error("No data received from server");
+    }
+
+    return response.data;
+  }
+
+  static async deleteTask(taskId: string): Promise<void> {
+    try {
+      const url = `${import.meta.env.VITE_BACKEND_URL}/api/v1/tasks/${taskId}`;
+
+      const response = await fetch(url, {
+        method: "DELETE",
+        headers: {
+          ...this.getAuthHeaders(),
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to delete task: ${response.status}`);
+      }
+
+      // 204 No Content is success for DELETE - no need to parse JSON
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Network error occurred while deleting task");
+    }
   }
 }
